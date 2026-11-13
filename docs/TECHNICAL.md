@@ -40,25 +40,6 @@ simulated memory for tests), `rtti.rs` (Itanium and MSVC RTTI) and `game.rs` (la
   (linked 526 s earlier) with the same object layout; only the statics moved (staff `0x5683E08`, clubs
   `0x5683F78`, date `0x56257C8`, from FMLibreEditor's `gamepass-0.9.2409.0.toml`). Its process is `fm.exe` too,
   run from the package's `Content` folder, and opens with the same rights.
-- Builds after the release (all from FMLibreEditor's profiles, object layout unchanged; `BUILDS` in
-  `agent/src/game.rs`): Steam 26385295 (10 Nov 2026, `PE-6AE8B5A4-17CB9000`) and 26577676 (12 Nov,
-  `PE-6AF38E5C-185FA000`) share staff `0x5820858`, clubs `0x58209C8`, date `0x57CA3B8`; Game Pass 0.9.2435.0
-  (`PE-6AE8CF77-17969000`) has staff `0x53B7E28`, clubs `0x53B7F98`, date `0x53597C8`; macOS arm64 26385295
-  (`2A2D0ED6-…`) and 26577676 (`A8550B47-…`) share staff `0x576EE98`, clubs `0x576F008`, date `0x574DDB8`; the
-  Intel halves are listed too. macOS arm64 26577676 was live-tested on 12 Nov 2026 (reads; budget, morale, one
-  training day, each with undo; sell/buy as dry runs). The Windows builds have writes on by FMLibreEditor's
-  finding that the object layout is unchanged (not live-tested by this project yet); 26385295 on the Mac and the
-  Intel halves are read-only until allowed.
-- **Unknown build** (after a patch): `game::statics` looks the statics up itself (`discover`). In all 11 measured
-  profiles the clubs pair sits `0x170` after the staff pair, so it scans the image for two pointer-list pairs at
-  that distance, where the second holds clubs (name readable) and the first holds a manager whose chain
-  (contract → team → club → finances) checks out and ends at a club of that list. The date is searched within
-  `0x400` of the distances the known builds of the same platform have between date and staff list, and must fit the
-  team's date (not earlier, at most 200 days later); otherwise the team's date is used as before. A failed search
-  is retried at most every 20 s. Measured on the Mac (26577676): 1,945 such double pairs in `__DATA` (the largest
-  are tried first; the real one holds 21,852 staff and 22,141 clubs) and 21 date-like values, exactly one within
-  `0x400` of a known distance; the game date carries flag bits above the day. The research command `discover` runs
-  the search on a known build and compares with the profile. `ping` reports `statics: "profile" | "discovered" | null`.
 - The human manager is found in the game's staff array (the `(begin, end)` pair at RVA `0x5705818`), with MSVC
   RTTI as a fallback: `[vtable-8]` is the Complete Object Locator, whose TypeDescriptor holds
   `.?AVHUMAN_NON_PLAYER@db@@`. The in-game date is at RVA `0x56AF378`.
@@ -192,65 +173,6 @@ marker's slot counted from the first tick (slot 7 of 11 = 60). The translucent p
 ticks on one side, so the count of 11 is assumed when the chain of ticks is incomplete. A capture is saved as
 `last-capture.png` (and `last-breakdown.png` when it held a Breakdown) in the app's data folder, so a wrong
 reading can be replayed with `fm27-trainer analyze <png> --ocr`.
-
-Since the evening of 9 November 2026 (a user still got "Read 8 of 17", 0 for the eight tactical areas, bars at
-90–100; another could not read anything at all):
-- **Every FM language.** The labels of the Breakdown in all 20 of FM's languages (Arabic left out: probably
-  mirrored, untested) are in `app/src/labels.rs`, generated from FM's own `data/game_simulation/languages.fmf` by
-  `tools/research/breakdown_labels.py` (text ids 0x100AE1xx; the format is described in the script). A capture is
-  matched against every language and the one with the most titles and labels wins (English on a tie). US English
-  has two different labels: "Coaching Support" and "Head Coach Tendencies". In seven languages Player Ability and
-  Player Capability have the same name (German "Spielerfähigkeit"): titles are found first (the topmost line) and
-  never reused for a key factor.
-- **Matching on letters only.** Spaces, punctuation and accents are dropped on both sides (Chinese, Japanese and
-  Korean OCR has no spaces; another OCR language reads "ä" as "a"), and a label is found as an approximate
-  substring (Levenshtein, one letter per six). A label must be at least half of its line, otherwise "Player
-  Capability" is found in "a player's capability and their ..." of the description above it. Each piece of a
-  line belongs to one label (Greek "Ικανότητα Παίκτη" is inside "Τακτική Ικανότητα Παίκτη").
-- **The pie glued to the label.** OCR sometimes reads the pie as a trailing "O" or "'" ("…rivalesO"); the end of
-  the label, computed in proportion to the characters, then fell inside the pie and the search started after it.
-  For lines with something after the label, the end is computed from the median character width of the clean lines.
-- **Letters and icons are not pies.** A pie is a dense disc: at least 60 % of the pixels inside its rim are
-  coloured or clearly lighter than the background next to it, and its bounding-box corners are not (an icon is a
-  light square). Before this, the "Q" of a label or the icon in front of it could be measured as an empty pie: 0.
-  A reading of 0 is now always flagged for checking.
-- **Brightness and colour.** "Light" (the empty segments) is relative to the background of the search band
-  (median + 0.25, at least 0.35, at most 0.9) instead of a fixed 0.66, and "coloured" must also be 0.2 brighter
-  than that background (a panel in a strong club colour can itself be saturated, but is much darker than a fill).
-  Pixels with the fill's hue but less saturation (s ≥ 0.2) count as fill: a washed-out HDR capture leaves part of
-  a yellow fill at s ≈ 0.27. A sector counts as filled against all its pixels, not just the recognised ones.
-  In the bars, the frame border is told apart from the ticks by their regular spacing (one or two steps; the
-  border is ~2.3 steps away), the step is taken again from the chain around the marker only (text in the band
-  gives other spacings), and the level marker is the first narrow coloured stripe (a wide coloured area is the
-  club colour at the screen edge). Before, a darker capture (for example with HDR on) put every bar at 90–100 and
-  read pies one segment too high; a capture with lifted blacks lost the bars.
-- **A label touching its pie.** When the run of columns is wider than it is high and its leftmost columns are
-  much taller than its rightmost (letters against a round edge), the pie is the rightmost square: it always
-  stands to the right of its label. A stretched (elliptic) pie is symmetric and is left alone.
-- **Bars without a title.** A title the OCR misread ("Taktik Anlayt*") no longer loses its bar: the bars are on the
-  row of the other titles, and each panel starts where its labels or "Key Factors" header start (Tactical
-  Understanding has columns 0 and 1).
-- **Which pass wins.** Of the reading at capture size and the one at reference size, the one with the most
-  unflagged gauges plus bars wins (the reference size on a tie); a flagged gauge no longer counts as read.
-- **OCR language.** Windows OCR is created for the user's profile language, else the first installed OCR
-  language (Windows has no OCR for e.g. Thai). On the Mac, Vision reads English by default. When fewer than 6
-  labels are found, every other OCR language is tried too (Windows: the installed OCR languages; Mac: Vision's
-  supported languages, `recognitionLanguages`, macOS 13+).
-- **The FM window.** On Windows the capture takes the window of fm.exe itself (by process id). Going by the title
-  alone could pick a browser with a page about Football Manager open, which is often as large as FM; browsers
-  are never taken now.
-- **Diagnostics.** Every screen reading writes `last-analysis.txt` (version, size, OCR and FM language, every gauge
-  with fill, hue and box, the bars, and all OCR lines); the app asks for it together with `last-breakdown.png`
-  when a reading is incomplete or flagged. `analyze <png> --ocr` prints the same; `FM27_VISION_DEBUG=1` adds the
-  search ranges.
-
-Regression: `tools/research/vision_regress.py <capture.png>` builds variants of a capture (sizes 1366×768 to
-3840×2160, darker ×0.7, linear light, gamma 0.6, lifted blacks, washed out, lighter and bluish panels, the labels
-painted over in German, Dutch, French, Spanish, Polish, Turkish and US English) and compares every reading with
-the capture's own: 18 of 18 right on Sem's 2560×1440 Sunderland capture. A wider set in the session (27 images,
-also ×0.5 darker, saturated green and yellow panels, a half capture, grey and channel-swapped): release 0.2.3 read
-7 completely right, 0.2.4 reads 23; still wrong are the grey and channel-swapped captures (no colour to read), the
-half capture, and one gauge on the yellow panels.
 
 ## Testing hooks
 

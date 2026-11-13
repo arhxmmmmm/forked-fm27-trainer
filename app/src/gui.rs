@@ -62,17 +62,33 @@ struct Settings {
     /// Tactisch begrip op 100 % houden zolang de app open is (FM laat het wekelijks zakken).
     #[serde(default)]
     keep_understanding: bool,
+    /// De Breakdown elke zoveel seconden zelf opnieuw uitlezen zolang hij in FM open staat.
+    #[serde(default)]
+    auto_read: bool,
+    #[serde(default = "ten")]
+    auto_read_secs: u32,
     planner: PlannerSettings,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { lang: i18n::detect(), rate: 1.17, capture_delay: true, auto_training: true, allow_untested: false, keep_understanding: false, planner: PlannerSettings::default() }
+        Settings { lang: i18n::detect(), rate: 1.17, capture_delay: true, auto_training: true, allow_untested: false, keep_understanding: false, auto_read: false, auto_read_secs: 10, planner: PlannerSettings::default() }
     }
 }
 
 fn yes() -> bool {
     true
+}
+
+fn ten() -> u32 {
+    10
+}
+
+/// Zelfde waarden (op een halve punt na) als bij de vorige uitlezing.
+fn same_values(a: &Effectiveness, b: &Effectiveness) -> bool {
+    Factor::ALL.iter().all(|f| (a.get(*f) - b.get(*f)).abs() < 0.5)
+        && a.components.len() == b.components.len()
+        && a.components.iter().zip(&b.components).all(|(x, y)| x.0 == y.0 && (x.1 - y.1).abs() < 0.5)
 }
 
 fn settings_file() -> PathBuf {
@@ -111,6 +127,9 @@ struct App {
     status: String,
     status_error: bool,
     analysis_rx: Option<mpsc::Receiver<AnalysisResult>>,
+    /// de lopende uitlezing is door auto-uitlezen gestart (stil: geen foutmelding, geen "Bezig…")
+    auto_pending: bool,
+    last_auto: std::time::Instant,
     image_path: String,
     show_file: bool,
     edit_mode: bool,
@@ -163,6 +182,8 @@ impl App {
             status: String::new(),
             status_error: false,
             analysis_rx: None,
+            auto_pending: false,
+            last_auto: std::time::Instant::now(),
             image_path: String::new(),
             show_file: false,
             edit_mode: false,
@@ -252,7 +273,9 @@ impl App {
             ctx2.request_repaint();
         });
         self.analysis_rx = Some(rx);
-        self.set_status(t!("Bezig met uitlezen…", "Reading…"), false);
+        if !self.auto_pending {
+            self.set_status(t!("Bezig met uitlezen…", "Reading…"), false);
+        }
     }
 
     fn poll_analysis(&mut self, ctx: &egui::Context) {
@@ -260,11 +283,17 @@ impl App {
         if let Ok(res) = rx.try_recv() {
             self.analysis_rx = None;
             let _ = ctx;
+            let auto = std::mem::take(&mut self.auto_pending);
             match res {
                 Ok((a, src)) => {
-                    let src_is_screen = src == t!("FM27-scherm", "FM27 screen");
                     let when = chrono::Local::now().format("%d-%m %H:%M");
-                    self.eff = a.to_effectiveness(&format!("{src} · {when}"));
+                    let new_eff = a.to_effectiveness(&format!("{src} · {when}"));
+                    // auto-uitlezen: niets veranderd, dan niets aanraken (het plan blijft staan)
+                    if auto && same_values(&self.eff, &new_eff) {
+                        self.set_status(t!(format!("Auto-uitlezen: geen verandering ({}).", chrono::Local::now().format("%H:%M:%S")), format!("Auto-read: no change ({}).", chrono::Local::now().format("%H:%M:%S"))), false);
+                        return;
+                    }
+                    self.eff = new_eff;
                     // spel-datum erbij, zodat de app weet hoe oud de meting in speltijd is
                     if let Ok(v) = agent::request(json!({"cmd": "game_date"})) {
                         let (y, d) = (v.get("year").and_then(|x| x.as_i64()), v.get("doy").and_then(|x| x.as_u64()));
@@ -274,9 +303,6 @@ impl App {
                     }
                     let _ = crate::save_effectiveness(&self.eff);
                     let mut msg = t!(format!("{} van 17 meters gelezen.", a.gauges.len()), format!("Read {} of 17 gauges.", a.gauges.len())).to_string();
-                    if !a.lang.starts_with("english") {
-                        msg.push_str(&format!(" (FM: {})", a.lang));
-                    }
                     // een meting die niet bij de kleur van de meter past: laten nakijken
                     let doubts: Vec<&str> = a.gauges.iter().filter(|g| g.doubt).map(|g| g.factor.label()).collect();
                     if !doubts.is_empty() {
@@ -286,18 +312,13 @@ impl App {
                             format!("Please check (colour and fill disagree): {}. Fix them with 'Adjust values manually'.", doubts.join(", "))
                         ));
                     }
-                    let incomplete = a.gauges.len() < 17 || a.components.len() < 4 || !doubts.is_empty();
-                    if incomplete && src_is_screen {
-                        // zonder de opname is een verkeerde uitlezing niet na te spelen
-                        msg.push(' ');
-                        msg.push_str(t!(
-                            "Klopt het niet? Stuur last-breakdown.png en last-analysis.txt uit de app-map (Instellingen → Open app-map) mee met je melding.",
-                            "Not right? Attach last-breakdown.png and last-analysis.txt from the app folder (Settings → Open app folder) to your report."
-                        ));
-                    }
-                    self.set_status(msg, incomplete);
+                    self.set_status(msg, !doubts.is_empty());
                     self.week_plan = None;
                     self.year.clear();
+                }
+                Err(e) if auto => {
+                    let _ = e;
+                    self.set_status(t!("Auto-uitlezen: wacht op de Breakdown in FM…", "Auto-read: waiting for the Breakdown screen in FM…"), false);
                 }
                 Err(e) => self.set_status(e, true),
             }
@@ -473,11 +494,35 @@ impl App {
             }
         });
         if read {
+            self.last_auto = std::time::Instant::now();
             self.start_analysis(ctx, None);
         }
         if file {
             self.show_file = !self.show_file;
         }
+        ui.horizontal(|ui| {
+            let on = self.settings.auto_read;
+            if theme::toggle(ui, &mut self.settings.auto_read).changed() {
+                self.last_auto = std::time::Instant::now() - std::time::Duration::from_secs(60);
+                self.save_settings();
+            }
+            ui.label(theme::label_strong(t!("Automatisch uitlezen", "Auto-read")));
+            ui.label(RichText::new(if on { t!("AAN", "ON") } else { t!("UIT", "OFF") }).strong().color(if on { theme::SUCCESS } else { theme::TEXT_FAINT }));
+            if self.settings.auto_read {
+                ui.label(t!("elke", "every"));
+                if ui.add(egui::DragValue::new(&mut self.settings.auto_read_secs).range(5..=120).suffix(" s")).changed() {
+                    self.save_settings();
+                }
+            }
+            ui.add(
+                egui::Label::new(theme::faint(t!(
+                    "Laat de Breakdown in FM open staan: de app leest hem dan zelf opnieuw. Handmatige aanpassingen blijven staan.",
+                    "Leave the Breakdown open in FM and the app re-reads it by itself. Manual edits are left alone."
+                )))
+                .wrap(),
+            );
+        });
+        ui.add_space(10.0);
         if self.show_file {
             theme::card(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -1819,7 +1864,7 @@ impl App {
                 }
                 // daar staat ook de laatste schermopname (last-breakdown.png): handig om mee te sturen
                 // als een meter verkeerd gelezen wordt
-                if theme::button(ui, icon::EXPORT, t!("Open app-map (laatste schermopname en uitlezing)", "Open app folder (last screenshot and reading)"), true).clicked() {
+                if theme::button(ui, icon::EXPORT, t!("Open app-map (laatste schermopname)", "Open app folder (last screenshot)"), true).clicked() {
                     let _ = std::fs::create_dir_all(crate::data_dir());
                     open_path(&crate::data_dir());
                 }
@@ -1849,6 +1894,15 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.snapshot(ctx);
         self.poll_analysis(ctx);
+        if self.settings.auto_read
+            && !self.edit_mode
+            && self.analysis_rx.is_none()
+            && self.last_auto.elapsed().as_secs() >= self.settings.auto_read_secs.max(5) as u64
+        {
+            self.last_auto = std::time::Instant::now();
+            self.auto_pending = true;
+            self.start_analysis(ctx, None);
+        }
         self.live.allow_untested = self.settings.allow_untested;
         self.live.keep_understanding = self.settings.keep_understanding;
         self.live.tick(ctx, &self.eff, &self.settings.planner, self.settings.auto_training);
@@ -1872,6 +1926,8 @@ impl eframe::App for App {
             });
         if self.analysis_rx.is_some() || self.live.busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        } else if self.settings.auto_read {
+            ctx.request_repaint_after(std::time::Duration::from_secs(1));
         } else {
             ctx.request_repaint_after(std::time::Duration::from_secs(5));
         }

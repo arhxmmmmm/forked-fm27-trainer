@@ -15,9 +15,8 @@ Een Rust-app (egui) voor Football Manager 27:
    verkopen** aan en **kopen** van een andere club, en **tactisch begrip maximaliseren** (zoals FM's in-game editor).
 
 Repo's (GitHub `SemHiel2003`):
-- `fm27-trainer`: **openbaar**, releases v0.2.0 (genotariseerde Mac-DMG + Windows-zip), v0.2.1, v0.2.2 (8 nov 2026) en v0.2.3 (9 nov 2026,
-  alleen Windows-zip via GitHub Actions, met de fixes voor de gebruikersmeldingen; de Mac-DMG komt van `./release.sh`
-  op de Mac en is voor 0.2.3 nog niet gemaakt). Daar níét zomaar naar pushen; de dev-repo
+- `fm27-trainer`: **openbaar**, releases v0.2.0 (genotariseerde Mac-DMG + Windows-zip), v0.2.1, v0.2.2 en v0.2.3 (8 nov 2026,
+  Windows-zip via GitHub Actions; de Mac-DMG komt van `./release.sh` op de Mac). Daar níét zomaar naar pushen; de dev-repo
   is er een voorouder van (fast-forward), en de release ontstaat door een tag `v*` naar de openbare repo te pushen (notes in
   `docs/releases/<tag>.md`). Lokaal heet die remote `public`. Vaste downloadlinks (altijd de nieuwste release, voor de
   downloadpagina's elders): `https://github.com/SemHiel2003/fm27-trainer/releases/latest/download/FM27-Trainer-Windows.zip`
@@ -34,7 +33,6 @@ app/                 de app (bin fm27-trainer): egui UI, OCR, planner, live-clie
   src/live_training.rs  kalender lezen → plannen → per week schrijven
   src/agent.rs       macOS: socket naar de module; Windows: roept fm27_agent::request rechtstreeks aan
   src/planner.rs, model.rs, vision.rs, export.rs, theme.rs, i18n.rs (t!("nl", "en"))
-  src/labels.rs      de Breakdown-labels in alle 20 talen van FM (gegenereerd, tools/research/breakdown_labels.py)
 agent/               crate fm27-agent: de spellogica, gedeeld
   src/lib.rs         dispatch van alle opdrachten (JSON); macOS: module in FM + socket-server
   src/mem.rs         geheugen: macOS (Mach, eigen proces), Windows (ReadProcessMemory/WriteProcessMemory op fm.exe),
@@ -45,21 +43,20 @@ agent/               crate fm27-agent: de spellogica, gedeeld
   src/understanding.rs  tactisch begrip (Tactical Understanding) per speler lezen en maximaliseren
   src/tests.rs       hele flow tegen gesimuleerd FM-geheugen, beide indelingen; MSVC-RTTI tegen testdata/rtti_test.dll
 docs/TECHNICAL.md    architectuur en posities; docs/research/fm27-transfer-offers.md: onderzoek biedingen
-tools/research/      fmq.py (onderzoeksclient), offers.py, breakdown_labels.py (labels uit FM's languages.fmf),
-                     vision_regress.py (regressietest schermuitlezing: varianten van een opname, ook in andere talen)
+tools/research/      fmq.py (onderzoeksclient), offers.py
 ```
 
 Alle opdrachten van de module: `ping`, `club`, `squad`, `set_finances`, `heal`, `lift_bans`, `inspire`, `undo`,
 `game_date`, `training_weeks`, `set_week`, `clubs`, `club_squad`, `sell`, `buy`, `understanding`, `max_understanding` (met `dry_run`),
 `human_flags`, `set_human_flags`,
 `allow_untested`, en voor onderzoek `chain`, `census`, `class_of`, `read`, `find_u16`, `find_ptr`, `write` (alleen
-met `expect`), `discover`. Zie `agent/src/lib.rs`.
+met `expect`). Zie `agent/src/lib.rs`.
 
 ## Bouwen en testen op Windows
 
 - Rust stable met de MSVC-toolchain (`rustup default stable-x86_64-pc-windows-msvc`) en Visual Studio Build Tools
   (workload "Desktop development with C++").
-- `cargo test -p fm27-agent`: 11 tests, `cargo test -p fm27-trainer`: 3 tests (nagemaakte taartmeters); horen allemaal te slagen.
+- `cargo test -p fm27-agent`: 8 tests, `cargo test -p fm27-trainer`: 3 tests (nagemaakte taartmeters); horen allemaal te slagen.
 - `cargo run -p fm27-trainer`: de app. `cargo build --release -p fm27-trainer` → `target\release\fm27-trainer.exe`
   (statische C-runtime via `.cargo/config.toml`).
 - **De release-exe heeft geen console** (`windows_subsystem = "windows"`). Gebruik voor de CLI de debug-build:
@@ -83,23 +80,6 @@ met `expect`), `discover`. Zie `agent/src/lib.rs`.
   objectindeling; vaste plekken uit FMLibreEditor `profiles/fm27/gamepass-0.9.2409.0.toml`; schrijven staat aan,
   **niet door ons live getest**). Onbekende build → geen vaste adressen (staflijst, clublijst, datum).
   Game Pass draait ook als `fm.exe` (uit `...\Content\`); een Xbox-console kan de app niet lezen.
-- **Builds na de release** (12 nov 2026, na meldingen "not connected" op sortitoutsi en GitHub #1/#2; alle vaste
-  plekken uit FMLibreEditor `profiles/fm27/`, objectindeling volgens hen ongewijzigd): Steam 26385295 (10 nov) =
-  `PE-6AE8B5A4-17CB9000` en 26577676 (12 nov) = `PE-6AF38E5C-185FA000`, beide staf 0x5820858, clubs 0x58209C8, datum
-  0x57CA3B8; Game Pass 0.9.2435.0 = `PE-6AE8CF77-17969000`, staf 0x53B7E28, clubs 0x53B7F98, datum 0x53597C8; Mac
-  arm64 26385295 (`2A2D0ED6-…`) en 26577676 (`A8550B47-FDE0-3D0D-A6CB-1B63DEE8DA19`), beide staf 0x576EE98, clubs
-  0x576F008, datum 0x574DDB8; de Intel-helften staan ook in `BUILDS`. Schrijven: Mac arm64 26577676 **live getest**
-  (12 nov 2026); de drie Windows-builds staan aan **op grond van FMLibreEditor's meting** (besluit van Sem; hij test
-  Windows zelf na); Mac 26385295 en Intel: alleen lezen.
-- **Onbekende build** (`game::statics` → `discover`): de app zoekt de lijsten zelf. Het clubpaar staat in alle 11
-  gemeten profielen 0x170 achter het stafpaar; gezocht wordt naar twee pointerlijst-paren op die afstand (grootste
-  eerst) waarvan het tweede clubs bevat en het eerste een manager met kloppende keten die bij een club uit die lijst
-  uitkomt. Datum: binnen 0x400 van de afstand datum↔staflijst van de bekende builds van hetzelfde platform, passend
-  bij de teamdatum; anders de teamdatum zoals vroeger. Schrijven blijft dan uit tot `allow_untested`. Gemeten op de
-  Mac: 1.945 dubbele paren in `__DATA`, 21 datum-achtige waarden, precies één binnen 0x400; de spel-datum heeft
-  vlagbits boven de dag (0x19). Onderzoeksopdracht `discover` vergelijkt de zoektocht met het profiel; `ping` geeft
-  `statics: profile|discovered|null` en `build_label`. Bij een nieuwe patch: profiel uit FMLibreEditor overnemen in
-  `BUILDS` en de procedure van Taak 1 doen.
 - **Schrijven staat op Windows aan** voor Steam-build 26340721 (`writes_tested: true` in `BUILDS`,
   `agent/src/game.rs`; live gecontroleerd op 8 nov 2026). Op een onbekende build (na een FM-patch) staat de app op
   alleen lezen; de gebruiker kan het per sessie toestaan (Instellingen → "Aanpassen op een niet-geteste FM-versie" →
@@ -213,13 +193,6 @@ via `read` uit fm.exe komt; game_plugin.dll ligt op Windows ingepakt op schijf m
 | MSVC-RTTI | n.v.t. | ✅ testdata én live (census, opstellingen) |
 | Game Pass / Xbox-app (0.9.2409.0) | n.v.t. | alleen simulatie (build, datum, staflijst, kalender); posities van FMLibreEditor |
 
-Mac arm64, Steam-build 26577676 (12 nov 2026, Ajax-save 25 juli 2027, `scratchpad/livetest.py`-achtige reeks via
-`fm27-trainer agent`): club, selectie (30), kalender (108 weken), clubs, tactisch begrip (offset 0xF8 leest
-plausibele waarden), datum ✅; `set_finances` +1, `inspire` (17→20), `set_week` (één dag), elk met `undo` en exact
-terug ✅; `heal` zonder geblesseerden (niets te doen); `sell`/`buy`/`max_understanding` alleen `dry_run`. Windows
-op de nieuwe builds: **nog niet live getest**. Dezelfde reeks is herhaald met de release-binaries van 0.2.4; de
-opdracht `discover` vond daar in 64 ms exact de adressen van het profiel (`same: true`).
-
 ## Taak 1: Windows live controleren — gedaan (8 nov 2026)
 
 Alle stappen hieronder zijn op Steam-build 26340721 doorlopen en groen: lezen klopte met FM (club, saldo, budgetten,
@@ -300,26 +273,8 @@ FM27 gebruikt nepnamen voor clubs zonder licentie: AC Milan = **Casciavit Milano
   streepje × 10. Getest door `last-breakdown.png` met Pillow te verkleinen naar 3840×2160 … 1280×720: alle 21
   waarden gelijk van 1366×768 tot 4K; op 720p (sterk vervaagd) 15 van 17. `FM27_VISION_DEBUG=1` print de
   balkmeting.
-- **Sinds 9 nov 2026 (avond, versie 0.2.4)**, na "nog steeds 8 van 17, eerste 8 op 0, balken
-  90/100/100/80" en "leest helemaal niets, moet FM in het Engels?": de labels van alle FM-talen (Arabisch niet;
-  US English heeft "Coaching Support" en "Head Coach Tendencies"), matching op alleen letters (spaties/accenten
-  eruit, CJK-OCR heeft geen spaties), titels eerst (Duits: Player Ability = Player Capability = "Spielerfähigkeit"),
-  een label is minstens de helft van zijn regel. Een taart moet een dichte, ronde schijf zijn (een letter "Q" of
-  het icoon vóór het label werd als lege meter = 0 gelezen); 0 wordt altijd gemarkeerd. Als de OCR de taart als
-  "O" aan het label plakt, komt het label-einde uit de mediane letterbreedte. "Licht" is relatief aan de
-  achtergrond (op een donkere opname stond elke balk op 90–100 doordat de kaderrand als streepje telde; nu
-  telt de regelmaat van de streepjes); "gekleurd" moet ook 0,2 lichter zijn dan de achtergrond, en minder
-  verzadigde pixels in de tint van de vulling tellen mee (flets HDR). Een balk wordt ook gelezen als zijn titel
-  niet herkend is (op de rij van de andere titels, in het eigen paneel). De opname neemt op Windows het venster
-  van fm.exe (op pid), nooit een browser (die met een FM-pagina open even groot kan zijn). De OCR valt terug op
-  andere talen (Windows: geïnstalleerde OCR-talen; Mac: Vision's talen via `recognitionLanguages`, niet live
-  getest). Elke uitlezing schrijft `last-analysis.txt`; de app vraagt erom bij een onvolledige uitlezing.
-  Getest met `tools/research/vision_regress.py` op Sem's opname: 18 van 18 varianten goed (0.2.3 las van een
-  bredere set van 27 er 7 goed, 0.2.4 23). De echte opname van de melders is nog steeds niet gezien: of dit hun
-  oorzaak was, is niet bevestigd.
-- Elke uitlezing bewaart `last-capture.png`, `last-analysis.txt` en, als er een Breakdown op stond,
-  `last-breakdown.png` in `%APPDATA%\FM27 Trainer`; naspelen met `target\debug\fm27-trainer.exe analyze <png> --ocr`
-  (die uitvoer is gelijk aan `last-analysis.txt`). Hulpscripts om
+- Elke uitlezing bewaart `last-capture.png` en, als er een Breakdown op stond, `last-breakdown.png` in
+  `%APPDATA%\FM27 Trainer`; naspelen met `target\debug\fm27-trainer.exe analyze <png> --ocr`. Hulpscripts om
   pixels te bekijken stonden in de scratchpad van de sessie (pie_debug.py, montage.py); zo nodig opnieuw maken
   met Pillow (`python -m pip install --user pillow`).
 
