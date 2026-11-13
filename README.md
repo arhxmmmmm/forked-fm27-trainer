@@ -100,16 +100,6 @@ Players who have never trained with the team yet are skipped until they have.
 
 ## Install
 
-### macOS
-
-1. Download [FM27-Trainer-macOS.dmg](../../releases/latest/download/FM27-Trainer-macOS.dmg) (always the latest version) and drag **FM27 Trainer** to *Applications*.
-2. First launch: allow **Screen Recording** (System Settings → Privacy & Security), so the app can read the Breakdown.
-3. For the live features: save and quit FM, click **Start FM with module** in the app (Steam must be open),
-   then load your save. The app connects by itself.
-
-> FM27 Trainer starts Football Manager itself, with a small module loaded alongside it. Starting FM from Steam
-> works too, but then only reading and planning are available.
-
 ### Windows
 
 1. Download [FM27-Trainer-Windows.zip](../../releases/latest/download/FM27-Trainer-Windows.zip) (always the latest version), unzip it and run **FM27 Trainer.exe**. The
